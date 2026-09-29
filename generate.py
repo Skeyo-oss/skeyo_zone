@@ -4,42 +4,42 @@ import json
 import html
 import datetime as dt
 from zoneinfo import ZoneInfo
-
+ 
 import requests
 import feedparser
 import anthropic
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-
+ 
 TZ = ZoneInfo("Europe/Warsaw")
 NOW = dt.datetime.now(TZ)
-
+ 
 # Łaziska Górne
 PLACE = "Łaziska Górne"
 LAT, LON = 50.14, 18.60
-
+ 
 MODEL = "claude-haiku-4-5"
-
+ 
 NEWS_FEEDS = [
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://tvn24.pl/najnowsze.xml",
     "https://www.theguardian.com/world/rss",
     "https://www.aljazeera.com/xml/rss/all.xml",
 ]
-
+ 
 DAYS = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
 MONTHS = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca",
           "sierpnia", "września", "października", "listopada", "grudnia"]
-
-
+ 
+ 
 def safe(fn, default):
     try:
         return fn()
     except Exception as e:
         print(f"[błąd] {fn.__name__}: {e}")
         return default
-
-
+ 
+ 
 def get_weather():
     r = requests.get(
         "https://api.open-meteo.com/v1/forecast",
@@ -58,8 +58,8 @@ def get_weather():
     r.raise_for_status()
     j = r.json()
     return {"daily": j["daily"], "hourly": j["hourly"]}
-
-
+ 
+ 
 def get_crypto():
     r = requests.get(
         "https://api.coingecko.com/api/v3/simple/price",
@@ -73,8 +73,8 @@ def get_crypto():
         "BTC": {"usd": d["bitcoin"]["usd"], "zmiana": d["bitcoin"]["usd_24h_change"]},
         "ETH": {"usd": d["ethereum"]["usd"], "zmiana": d["ethereum"]["usd_24h_change"]},
     }
-
-
+ 
+ 
 def get_news():
     titles = []
     for url in NEWS_FEEDS:
@@ -85,8 +85,8 @@ def get_news():
         except Exception as ex:
             print(f"[błąd] news {url}: {ex}")
     return titles
-
-
+ 
+ 
 def google_creds():
     return Credentials(
         None,
@@ -99,8 +99,8 @@ def google_creds():
             "https://www.googleapis.com/auth/calendar.readonly",
         ],
     )
-
-
+ 
+ 
 def get_calendar():
     svc = build("calendar", "v3", credentials=google_creds(), cache_discovery=False)
     start = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -121,8 +121,8 @@ def get_calendar():
             "miejsce": e.get("location", ""),
         })
     return out
-
-
+ 
+ 
 def get_mail():
     svc = build("gmail", "v1", credentials=google_creds(), cache_discovery=False)
     q = "newer_than:2d in:inbox -category:promotions -category:social -category:forums"
@@ -140,11 +140,11 @@ def get_mail():
             "fragment": msg.get("snippet", "")[:200],
         })
     return out
-
-
+ 
+ 
 PROMPT = """Jesteś asystentem, który układa poranny ekran powitalny. Dziś: {date}. Miejsce: {place}.
 Odpowiadasz po polsku, krótko, konkretnie i neutralnie. Zwróć WYŁĄCZNIE poprawny JSON (bez markdown, bez komentarza) w formacie:
-
+ 
 {{
   "temperatura": "np. 11° / 17°  (rano / maksimum w dzień)",
   "pogoda": "1-2 zdania: opady/burze i o której godzinie, wiatr jeśli istotny, czy brać parasol. Porównaj modele; jeśli się różnią, napisz to jednym zdaniem.",
@@ -153,21 +153,21 @@ Odpowiadasz po polsku, krótko, konkretnie i neutralnie. Zwróć WYŁĄCZNIE pop
   "poczta_pominieto": 0,
   "wiadomosci": [{{"kat": "Polska", "tekst": "jedno zdanie"}}, {{"kat": "Świat", "tekst": "jedno zdanie"}}]
 }}
-
+ 
 Zasady:
 - dzis: przypomnienia z kalendarza na dziś, po jednym na linię, w kolejności godzin, każdy zaczyna się od godziny w formacie GG:MM (wydarzenie całodniowe bez godziny zaczynaj od słowa "Cały dzień"). Jeśli brak: ["Brak wydarzeń w kalendarzu"].
 - poczta: tylko naprawdę ważne (faktury, płatności, dokumenty, urzędy, banki, terminy, sprawy osobiste i wiadomości od konkretnych osób). Pomiń newslettery, reklamy, powiadomienia platform i social mediów. Maksymalnie 5 pozycji. Jeśli brak: ["Brak ważnych wiadomości"]. W poczta_pominieto wpisz liczbę pominiętych.
 - wiadomosci: 12-15 najważniejszych wiadomości z nagłówków, uproszczonych do jednego jasnego zdania. Pole "kat" to jedna z wartości: Polska, Świat, Gospodarka, Bezpieczeństwo, Technologia. Bez powtórzeń tego samego tematu.
 - Ceny kryptowalut wstawia skrypt, nie umieszczaj ich w JSON.
-
+ 
 DANE:
 pogoda (modele: icon, gfs, ecmwf, meteofrance): {weather}
 kalendarz: {calendar}
 poczta: {mail}
 nagłówki wiadomości: {news}
 """
-
-
+ 
+ 
 def summarize(weather, calendar, mail, news):
     client = anthropic.Anthropic()
     prompt = PROMPT.format(
@@ -186,24 +186,24 @@ def summarize(weather, calendar, mail, news):
     text = resp.content[0].text.strip()
     text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
     return json.loads(text)
-
-
+ 
+ 
 def esc(s):
     return html.escape(str(s))
-
-
+ 
+ 
 def fmt_price(v):
     return f"{v:,.0f}".replace(",", " ")
-
-
+ 
+ 
 def fmt_change(c):
     return f"{c:+.1f}%".replace(".", ",").replace("-", "−")
-
-
+ 
+ 
 def plain_lines(items):
     return "".join(f'<div class="t">{esc(it)}</div>' for it in items)
-
-
+ 
+ 
 def event_lines(items):
     out = []
     for it in items:
@@ -213,8 +213,8 @@ def event_lines(items):
         else:
             out.append(f'<div class="ev"><span class="h"></span><span>{esc(it)}</span></div>')
     return "".join(out)
-
-
+ 
+ 
 def news_items(items):
     out = []
     for it in items:
@@ -224,8 +224,8 @@ def news_items(items):
             kat, tekst = "", it
         out.append(f'<div class="n"><small>{esc(kat)}</small>{esc(tekst)}</div>')
     return "".join(out)
-
-
+ 
+ 
 CSS = r"""
 :root{--t1:#ececec;--t2:#a8a8a8;--t3:#666;--t4:#3a3a3a;--line:#1c1c1c}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -284,7 +284,7 @@ background:linear-gradient(rgba(0,0,0,0),#000 55%);font-size:10.5px;letter-spaci
 .nav a{cursor:pointer;transition:color .3s}
 .nav a.on{color:var(--t1)}
 """
-
+ 
 JS = r"""
 (function(){
   var deck=document.getElementById('deck');
@@ -296,11 +296,11 @@ JS = r"""
   deck.addEventListener('scroll',mark,{passive:true});
   requestAnimationFrame(function(){go(1,false);mark();});
   window.addEventListener('load',function(){go(1,false);mark();});
-
+ 
   var h=new Date().getHours();
   document.getElementById('hello').textContent=
     h<5?'Dobrej nocy':h<12?'Dzień dobry':h<18?'Miłego dnia':'Dobry wieczór';
-
+ 
   var KEY='skeyo_reminders';
   function load(){try{return JSON.parse(localStorage.getItem(KEY)||'[]');}catch(e){return [];}}
   function save(a){try{localStorage.setItem(KEY,JSON.stringify(a));}catch(e){}}
@@ -308,7 +308,7 @@ JS = r"""
   function pad(n){return String(n).padStart(2,'0');}
   function utc(x){return x.getUTCFullYear()+pad(x.getUTCMonth()+1)+pad(x.getUTCDate())+'T'+pad(x.getUTCHours())+pad(x.getUTCMinutes())+'00Z';}
   function ics(s){return String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\n/g,'\\n');}
-
+ 
   function toCalendar(r){
     var d=new Date(r.when),end=new Date(d.getTime()+30*60000);
     var lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//skeyo.oss//PL','BEGIN:VEVENT',
@@ -322,9 +322,9 @@ JS = r"""
     a.download='przypomnienie.ics';
     document.body.appendChild(a);a.click();document.body.removeChild(a);
   }
-
+ 
   function el(tag,cls,txt){var e=document.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e;}
-
+ 
   function render(){
     var all=load().sort(function(x,y){return new Date(x.when)-new Date(y.when);});
     var box=document.getElementById('rlist');box.textContent='';
@@ -350,7 +350,7 @@ JS = r"""
       tx.appendChild(e);
     });
   }
-
+ 
   document.getElementById('add').addEventListener('click',function(){
     var t=document.getElementById('rt'),w=document.getElementById('rw'),n=document.getElementById('rn');
     if(!t.value.trim()||!w.value){alert('Wpisz tytuł i wybierz datę.');return;}
@@ -362,7 +362,7 @@ JS = r"""
   render();
 })();
 """
-
+ 
 TEMPLATE = """<!doctype html><html lang="pl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#000000">
@@ -392,20 +392,20 @@ TEMPLATE = """<!doctype html><html lang="pl"><head><meta charset="utf-8">
 <nav class="nav"><a data-i="0">Świat</a><a data-i="1" class="on">Dziś</a><a data-i="2">Przypomnienia</a></nav>
 <script>__JS__</script>
 </body></html>"""
-
-
+ 
+ 
 def render(ai, crypto):
     day = DAYS[NOW.weekday()]
     date = f"{NOW.day} {MONTHS[NOW.month - 1]}"
     skipped = ai.get("poczta_pominieto", 0)
-
+ 
     crypto_html = ""
     if crypto:
         crypto_html = '<div class="row">' + "".join(
             f'<span>{k} {fmt_price(v["usd"])}<small>{fmt_change(v["zmiana"])}</small></span>'
             for k, v in crypto.items()
         ) + "</div>"
-
+ 
     main = (
         f'<div class="brand"><b>skeyo.oss</b><span>akt. {NOW:%H:%M}</span></div>'
         f'<div class="hello" id="hello"></div>'
@@ -420,36 +420,36 @@ def render(ai, crypto):
         + "</div>"
         f'<div class="sec"><div class="lab">Rynek</div>{crypto_html}</div>'
     )
-
+ 
     news = (
         '<div class="brand"><b>skeyo.oss</b><span>świat</span></div>'
         '<div class="title">Świat</div>'
         f'<div class="sub">Najważniejsze wiadomości · {esc(date)}</div>'
         f'{news_items(ai.get("wiadomosci", []))}'
     )
-
+ 
     return (TEMPLATE.replace("__CSS__", CSS).replace("__JS__", JS)
             .replace("__MAIN__", main).replace("__NEWS__", news))
-
-
+ 
+ 
 def main():
     weather = safe(get_weather, {})
     calendar = safe(get_calendar, [])
     mail = safe(get_mail, [])
     news = safe(get_news, [])
     crypto = safe(get_crypto, {})
-
+ 
     try:
         ai = summarize(weather, calendar, mail, news)
     except Exception as e:
         print(f"[błąd] streszczenie: {e}")
         ai = {"pogoda": "Nie udało się przygotować podsumowania.", "dzis": [], "poczta": [], "wiadomosci": []}
-
+ 
     os.makedirs("site", exist_ok=True)
     with open("site/index.html", "w", encoding="utf-8") as f:
         f.write(render(ai, crypto))
     print("Gotowe: site/index.html")
-
-
+ 
+ 
 if __name__ == "__main__":
     main()
